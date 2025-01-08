@@ -1,0 +1,20 @@
+{
+  "name": "ocr_test",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "nodemon --no-deprecation index.js"
+  },
+  "author": "lhk228",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@google/generative-ai": "^0.21.0",
+    "axios": "^1.7.9",
+    "express": "^4.21.2",
+    "nodemon": "^3.1.9",
+    "p-limit": "^6.2.0",
+    "tesseract.js": "^5.1.1",
+    "xlsx": "^0.18.5"
+  }
+}
