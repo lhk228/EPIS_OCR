@@ -24,7 +24,6 @@ const readJsonFile = (filePath) => {
 // 특정 문구를 찾는 함수
 const extractTextFromImage = async (imageUrl) => {
   try {
-    // const { data } = await Tesseract.recognize(imageUrl, 'kor', {logger: (m) => console.log(m)});
     const { data } = await Tesseract.recognize(imageUrl, 'kor');
     
 		return data.text.trim(); // 추출된 텍스트 반환
@@ -48,39 +47,53 @@ const isValidImageUrl = async (imageUrl) => {
 const filterImagesByKeywords = async (originLinkArray, keywords) => {
   const filteredArr = [];
 
-  for (const imageUrl of originLinkArray) {
-    try {
-      // 이미지 URL 유효성 검사
-      if (!(await isValidImageUrl(imageUrl))) {
-        console.warn(`유효하지 않은 이미지 URL: ${imageUrl}`);
-        continue; // 유효하지 않으면 다음 URL로 건너뜀
-      }
+  try {
+    // 여러 이미지를 병렬로 처리
+    const imageProcessingPromises = originLinkArray.map(async (imageUrl) => {
+      try {
+        // 이미지 URL 유효성 검사
+        if (!(await isValidImageUrl(imageUrl))) {
+          console.warn(`유효하지 않은 이미지 URL: ${imageUrl}`);
+          return null; // 유효하지 않으면 null 반환
+        }
 
-      // 이미지에서 텍스트 추출
-      const extractedText = await extractTextFromImage(imageUrl);
+        // 이미지에서 텍스트 추출
+        const extractedText = await extractTextFromImage(imageUrl);
 
-      // 키워드 중 하나라도 포함된 경우 해당 링크를 filteredArr에 추가
-      if (keywords.some((keyword) => extractedText.includes(keyword))) {
-        filteredArr.push(imageUrl);
+				console.log('=============================================================================');
+				console.log('##추출시작####################################################################');
+				console.log('=============================================================================');
+				console.log(extractedText)
+				console.log('~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~');
+				console.log('###############################추출종료######################################');
+				console.log('~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~');
+        // 키워드 중 하나라도 포함된 경우 해당 링크를 filteredArr에 추가
+        if (keywords.some((keyword) => extractedText.includes(keyword))) {
+          return imageUrl;
+        }
+				return null;
+      } catch (error) {
+        console.error(`이미지 처리 중 오류 발생: ${imageUrl} - ${error.message}`);
       }
-    } catch (error) {
-      console.error(`이미지 처리 중 오류 발생: ${imageUrl} - ${error.message}`);
-    }
+    });
+
+    // 모든 이미지 처리 결과를 병렬로 실행하고 결과를 기다림
+    const results = await Promise.all(imageProcessingPromises);
+
+    // null이 아닌 유효한 이미지 링크만 필터링
+    filteredArr.push(...results.filter((result) => result));
+  } catch (error) {
+    console.error(`이미지 필터링 중 오류 발생: ${error.message}`);
   }
 
   return filteredArr;
 };
 
 //신규 데이터 확인
-const isNewData = (crawlData) => {
-	
-	const originData = readJsonFile("수집해놨던 db.json 파일경로"); //기존에 JSON으로 저장해뒀던 데이터
-
-	//수집했던 데이터인지 확인
-	const newData = crawlData.filter((v) =>{ return originData.find((i) => i.productId !== v.productId ) });
-
-	return newData;
+const isNewData = (crawlData, dbData) => {
+	return crawlData.filter(v => !dbData.find(i =>  i.CLCT_SNO === v.CLCT_SNO ) );
 }
+
 
 // 정규식: 괄호 이전 부분만 추출
 const extractOrigin = (origin) => {
@@ -103,7 +116,7 @@ const getMatchInfo = (originInfo, data) => {
 
 //테서렉트 OCR
 const tesseractOCR = async (data) => {
-	const keywords = ["식품의유형","소비기한","제조연월일",'제공고시','영양정보','원재료명','제조원','원재료','원산지','제품정보','상품정보','원료', '함량', "표시대상", "알레르기"];
+	const keywords = ["주의사항",'식품유형',"소비기한","제조연월일",'제공고시','영양정보','원재료명','제조원','원재료','원산지','제품정보','상품정보','원료', '함량', "표시대상", "알레르기","표시사항"];
 	
 	return await filterImagesByKeywords(data, keywords);
 };
@@ -163,12 +176,11 @@ const api_gemini = async (param) => {
 	return JSON.parse(convertText);
 };
 
-
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // 데이터 변환 함수
-const convertData = async (param) => {
-  const newData = param;
+const convertData = async (crawlData, dbData) => {
+  const newData = isNewData(crawlData, dbData);
 
   if (!newData || newData.length === 0) {
     return [];
@@ -184,9 +196,9 @@ const convertData = async (param) => {
 
       // 이미지 URL이 문자열일 경우 배열로 변환
       if (images && typeof images === "string") {
-        const imageArray = images.split("§").map((url) => url.trim());
-        console.log("Original Image Array:", imageArray);
+        const imageArray = images.split("§").map((url) => url.trim()).map(url => url.replace(/\?type=w860$/, ''));
 
+				console.log('origin Images :',imageArray);
         // Tesseract OCR 호출
         images = await tesseractOCR(imageArray);
         console.log("Filtered Images (Tesseract):", images);
@@ -194,30 +206,30 @@ const convertData = async (param) => {
         images = [];
       }
 
-      // Clova OCR 호출
-      if (images.length > 0) {
-        const clovaTexts = await Promise.all(
-          images.map((image) => api_clova(image))
-        );
-        textInfo += clovaTexts.join(" ");
-      }
+			// Clova OCR 호출 (순차적 처리)
+			// let clovaTexts = [];
+			// for (const image of images) {
+			// 	const clovaText = await api_clova(image);
+			// 	clovaTexts.push(clovaText);
+			// }
+			// textInfo += clovaTexts.join(" ");
 
-      console.log("Clova OCR Results:", textInfo);
+      // console.log("Clova OCR Results:", textInfo);
 
-      // Gemini 호출
-      const geminiData = await api_gemini(textInfo);
-      console.log("Gemini Result:", geminiData);
+      // // Gemini 호출
+      // const geminiData = await api_gemini(textInfo);
+      // console.log("Gemini Result:", geminiData);
 
-      v.MATCH = getMatchInfo(originInfo, geminiData.원산지정보);
-      v.PRDR_EXPLN_CN = geminiData.상세정보;
+      // v.MATCH = getMatchInfo(originInfo, geminiData.원산지정보);
+      // v.PRDR_EXPLN_CN = geminiData.상세정보;
 
-      // IMG_URL 삭제
-      delete v.IMG_URL;
+      // // IMG_URL 삭제
+      // delete v.IMG_URL;
 
-      result.push(v);
+      // result.push(v);
 
-      // 요청 간 딜레이 추가
-      await delay(100); // 100ms 대기
+      // // 요청 간 딜레이 추가
+      // await delay(100); // 100ms 대기
     } catch (error) {
       console.error("Error processing item:", v, error);
     }
@@ -227,10 +239,13 @@ const convertData = async (param) => {
 };
 
 // JSON 파일 쓰기 함수
-const writeJsonFile = async (filePath, data) => {
+const writeJsonFile = async (fileName, data) => {
   try {
+    const filePath = `${__dirname}/${fileName}.json`;
     const jsonData = JSON.stringify(data, null, 2); // 데이터를 JSON 문자열로 변환 (들여쓰기 2)
-    await fs.writeFile(__dirname, jsonData, 'utf-8');
+    
+    // 'utf-8'을 encoding으로 직접 전달
+    await fs.promises.writeFile(filePath, jsonData, 'utf-8');
     console.log(`JSON 파일이 저장되었습니다: ${filePath}`);
   } catch (error) {
     console.error(`JSON 파일 저장 중 오류 발생: ${error.message}`);
@@ -239,11 +254,14 @@ const writeJsonFile = async (filePath, data) => {
 
 // 비동기 실행
 (async () => {
-  const jsonData = readJsonFile("sample.json");
+  const newData = readJsonFile("ocrNewData.json");
+	const dbData = readJsonFile("ocrDB.json");
+  const result = await convertData(newData, dbData);
 
-  const result = await convertData(jsonData);
+  // console.log("최종 결과 :", result);
 
-  console.log("최종 결과 :", result);
-
-	writeJsonFile()
+	// dbData.push(...result);
+	
+	// await writeJsonFile("ocrNewData",result);//신규데이터파일 저장
+	// await writeJsonFile("ocrDB",dbData);//전체데이터 파일 저장
 })();
