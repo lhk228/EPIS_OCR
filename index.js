@@ -87,8 +87,6 @@ const getMatchInfo = (originInfo, data) => {
   return "E"; 
 }
 
-
-
 // 이미지 크기 확인 함수
 const getImageSize = async (imageUrl) => {
   try {
@@ -134,6 +132,7 @@ const tesseractOCR = async (originLinkArray) => {
 				console.log('################################################################################');
         console.log("추출된 텍스트:", extractedText);
 				console.log('###############################################################################');
+
         // 키워드가 포함된 경우 링크 추가
         if (keywords.some((keyword) => extractedText.includes(keyword))) {
           return imageUrl;
@@ -157,6 +156,7 @@ const tesseractOCR = async (originLinkArray) => {
   return filteredArr;
 };
 
+//클로바 api
 const api_clova = async (param, data) => {
   const secretKey = "aG9WckV3cXRKQUFCYkRCcWZEZmxxclVyYXZSYkZSaUY=";
   const apiUrl ="https://q94sb7hfbg.apigw.ntruss.com/custom/v1/35242/ce552f91e9dc79133d2c327dcc006de9fe02e1411e44d1a012f5e9451c0a34c2/general";
@@ -199,23 +199,59 @@ const api_clova = async (param, data) => {
   }
 };
 
+//이미지 링크 배열 변환환
+const convertStringToArray = (data) => {
+		//고정 제외 리스트
+		const fixedUrlList = [
+			"https://shop-phinf.pstatic.net/20240314_215/1710406075637zWoCJ_JPEG/240104_%ED%94%84%EB%A0%88%EC%8B%9C%EC%A7%80_%EC%8A%A4%EB%A7%88%ED%8A%B8%EC%8A%A4%ED%86%A0%EC%96%B4_intro3.jpg",
+			"https://shop-phinf.pstatic.net/20240314_31/17104060851745Voa7_JPEG/240301_%EB%B0%B0%EC%86%A1%EC%95%88%EB%82%B4.jpg"
+	];
+	const result = data
+	.split("§")
+	.map((url) => url.trim())
+	.map((url) => url.replace(/\?type=w860$/, ''))
+	.map((url) => url.replace(/\?type=wg860$/, ''))
+	.filter((url) => url !== "")  // 빈 문자열 제외
+	.filter((url) => !url.toLowerCase().endsWith('.gif')) // .gif 확장자 제외
+	.filter((url) => !fixedUrlList.includes(url)); // fixedUrlList에 있는 URL 제외
+
+	return result;
+}
 
 //제미나이 api
-const api_gemini = async (param) => {
+const api_gemini = async (param, originInfo) => {
 
+	console.log('######제미나이 전달 origin:',originInfo);
+	if(param.length === 0) {
+		return {
+			원산지정보:[],
+			상세정보:"상세정보 없음"
+		}
+	}
   const genAI = new GoogleGenerativeAI("AIzaSyDJ5kF961JPdsNZMGGpAOGTXbXwS62F4XA");
   const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
   const prompt = `
-    ${param}
-    이 데이터에서 원산지 정보와 추가정보를 JSON 형식으로 변환할 수 있게 { 원산지정보, 상세정보 } 모양으로 만들어서 출력해줘.
-    -'원산지정보'의 모양은 원산지정보:[{itemNm, origin}...] 형식. 데이터가 없을경우에도 모양은 유지해주고, 정보가 없을시 공백처리.
-		- '국산', '국내', '국내산' 등 키워드일경우 '국내산'으로 일치시켜줘
-		- '국내산 한우', '국내산 돈육' 등 키워드에서 돈육, 한우 등은 제외해줘. 오로지 '원산지' 만 표시해줘
-    - '상세정보'의 모양은 서술형으로 적되, 원재료(원료) 및 함량정보만, html 문에 영향을 줄 수 있는 텍스트는 제외하고 1줄로 서술할것
-    - object의 depth는 1depth로 유지
-		- 바로 사용할 수 있도록 JSON.stringfy 된 모습으로 출력할것. Markdown문법을 사용한 응답하지말것
-		- 원산지정보, 상세정보가 없더라도 모양을만들어서 빈데이터로라도 전달할것
+		요약할 데이터 '${param}'
+		비교할 데이터 '${originInfo}'
+
+    - 요약할데이터를 JSON 형식 ' {"원산지정보":[], "상세정보":String, "일치여부":String }' 형태로 가공해줘. 모든 key와 value는 필수로 존재해야해.
+    - '원산지정보'의 value는 {itemNm, origin} 의 형식을가진 객체로 이루어진 배열.
+		- itemNm은 재료명, origin은 원산지.
+		- origin이 '국산', '국내', '국내산' 등 키워드일경우 '국내산'으로 치환.
+		- 키워드에서 원산지가 아닌 다른 텍스트는 제외하고 원산지만 표시할것(국내산 돼지, 국내산 배추 등에서 국내산만 표시).
+		- '요약할 데이터'와 '비교할 데이터'를 비교하여 원산지 표기 일치여부를 판단하여 '일치여부' 에 추가. 
+		- 정확한 텍스트의 일치를 확인하는것이 아닌 맥락상 데이터간 원산지 표기국가가 들어맞는지를 판단해야함. 
+		- 여러개의 원산지 데이터 중 하나라도 일치하지 않으면 불일치로 판단. 
+		- 국산과 국내산은 같은 원산지임. 같은 국가 내 지역이 다른것은 일치로 판단.
+		- '일치여부'의 값은 일치 : Y, 불일치 : N로 표시하며, '요약할 데이터'와 '비교할 데이터'중 하나라도 누락되거나 판단이 어려울시 : U 로 표기.
+    - '상세정보'의 value는 서술형 텍스트, 원재료 및 함량정보를 표기한다. 가능할 경우 원산지도 함께 표기하며 이 외의 정보는 넣지 않는다.
+		- html 문에 영향을 줄 수 있는 텍스트는 제외하고 공백없이 1줄로 서술.
+    - 각 Obeject의 depth는 1depth로 제한.
+		- JSON.stringfy 된 형태로 출력.
+		- Markdown문법을 사용한 응답 금지.
 		- 상품정보가 여러개라도 1개 원산지정보와 상세설명에 서술하여 형식을 깨지 말것
+		-  모든 key와 value는 데이터가 없더라도 필수로 완성시킬것. 
+		- 데이터가 없을경우 빈배열과 빈 문자열을 value로 반환.
   `;
   const result = await model.generateContent(prompt);
 
@@ -227,15 +263,15 @@ const api_gemini = async (param) => {
 	return JSON.parse(convertText);
 };
 
+//0.1초 지연을 위한 함수
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // 데이터 변환 함수
 const convertData = async (crawlData, dbData) => {
+
   const newData = isNewData(crawlData, dbData);
 
-  if (!newData || newData.length === 0) {
-    return [];
-  }
+  if (!newData || newData.length === 0) { return []; }
 
   const result = [];
 
@@ -245,57 +281,45 @@ const convertData = async (crawlData, dbData) => {
       let textInfo = v.PRDT_EXPLN_CN || "";
       let originInfo = v.PLOR_NM;
 
-      // 이미지 URL이 문자열일 경우 배열로 변환
-			const fixedUrlList = [
-				"https://shop-phinf.pstatic.net/20240314_215/1710406075637zWoCJ_JPEG/240104_%ED%94%84%EB%A0%88%EC%8B%9C%EC%A7%80_%EC%8A%A4%EB%A7%88%ED%8A%B8%EC%8A%A4%ED%86%A0%EC%96%B4_intro3.jpg",
-				"https://shop-phinf.pstatic.net/20240314_31/17104060851745Voa7_JPEG/240301_%EB%B0%B0%EC%86%A1%EC%95%88%EB%82%B4.jpg"
-		];
-		
+		// 이미지 URL이 문자열일 경우 배열로 변환하여 테서렉트 정제
 		if (images && typeof images === "string") {
-				const imageArray = images
-						.split("§")
-						.map((url) => url.trim())
-						.map((url) => url.replace(/\?type=w860$/, ''))
-						.map((url) => url.replace(/\?type=wg860$/, ''))
-						.filter((url) => url !== "")  // 빈 문자열 제외
-						.filter((url) => !url.toLowerCase().endsWith('.gif')) // .gif 확장자 제외
-						.filter((url) => !fixedUrlList.includes(url)); // fixedUrlList에 있는 URL 제외
+				const imageArray = convertStringToArray(images);
 
-				console.log('1차 OCR 진행 목록 :',imageArray);
+				// console.log('1차 OCR 진행 목록 :',imageArray);
 
         // Tesseract OCR 호출
         images = await tesseractOCR(imageArray);
 
         console.log("테서렉트 추출 이미지 목록:", images);
 
-				if(images.length === 0){
-					const errorLog = {
-						timestamp: new Date().toISOString(),
-						itemData:JSON.stringify(v),
-					};
+				if (images.length === 0) {
 
-					fs.appendFile("추출실패목록.log", JSON.stringify(errorLog+",", null, 2) + "\n", (err) => { if (err) {console.error("Failed to write to log file", err);}});
+					const errorLog = { timestamp: new Date().toISOString(), itemData: JSON.stringify(v)};
+
+					fs.appendFile("추출실패목록.log",JSON.stringify(errorLog, null, 2) + ",\n",
+							(err) => {if (err) {console.error("Failed to write to log file", err);}}
+					);
 				}
-      } else {
-        images = [];
-      }
+      } else { images = []; }
 
 			// Clova OCR 호출 (순차적 처리)
 			let clovaTexts = [];
-			for (const image of images) {
-				const clovaText = await api_clova(image, v);
-				clovaTexts.push(clovaText);
-			}
+
+			for (const image of images) { const clovaResult = await api_clova(image, v); clovaTexts.push(clovaResult); }
+
 			textInfo += clovaTexts.join(" ");
 
-      console.log("클로바 정제 텍스트:", textInfo);
-
       // Gemini 호출
-      const geminiData = await api_gemini(textInfo);
-      console.log("Gemini 정제 데이터:", geminiData);
+      const geminiData = await api_gemini(textInfo, originInfo);
+      
+			console.log("Gemini 정제 데이터:", geminiData);
 
-      v.PLOR_MTCH_YN = getMatchInfo(originInfo, geminiData.원산지정보);
+      // v.PLOR_MTCH_YN = getMatchInfo(originInfo, geminiData.일치여부);
+      v.PLOR_MTCH_YN = geminiData.일치여부 || "U";
       v.PRDT_EXPLN_CN = geminiData.상세정보;
+			v.GEMINI = geminiData;
+			
+			if(!v.PLOR_NM){ v.PLOR_NM = "정보없음" }
 
       // IMG_URL 삭제
       delete v.IMG_URL;
@@ -304,6 +328,7 @@ const convertData = async (crawlData, dbData) => {
 
       // 요청 간 딜레이 추가
       await delay(100); // 100ms 대기
+
     } catch (error) {
       console.error("Error processing item:", v, error);
     }
@@ -326,15 +351,33 @@ const writeJsonFile = async (fileName, data) => {
   }
 };
 
+// 지정한 인덱스 범위만 배열로 반환(테스트용)
+function getRange(array, startIndex, endIndex) {
+	if (!Array.isArray(array)) throw new Error("첫 번째 인자는 배열이어야 합니다.");
+	if (typeof startIndex !== "number" || typeof endIndex !== "number") {
+			throw new Error("startIndex와 endIndex는 숫자여야 합니다.");
+	}
+
+	// 범위 조정
+	const validStartIndex = Math.max(0, startIndex);
+	const validEndIndex = Math.min(array.length - 1, endIndex);
+
+	// 배열 범위 반환
+	return array.slice(validStartIndex, validEndIndex + 1);
+}
+
 // 비동기 실행
 (async () => {
 	const startTime = Date.now(); // 시작 시간 기록
 	const request = {data : readJsonFile("crawlData.json") }
   const crawlData = request.data;
 	const dbData = readJsonFile("test_db.json");
-  const result = await convertData(crawlData, dbData);
+	// crawlData = getRange(crawlData, 0, 1);
+	// dbData = dbData.filter((v) => { return v.GEMINI.일치여부 !== "U"});
 
-  console.log("최종 결과 :", result);
+	const result = await convertData(crawlData, dbData);
+
+  // console.log("최종 결과 :", result);
 
 	const endTime = Date.now(); // 종료 시간 기록
   console.log(`함수 실행 시간: ${endTime - startTime}ms`);
@@ -347,4 +390,5 @@ const writeJsonFile = async (fileName, data) => {
 	} else {
 		console.log('신규 데이터가 없습니다');
 	}
+
 })();
